@@ -1,0 +1,809 @@
+import os, json, sys, requests
+from pathlib import Path
+from datetime import date
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parent.parent / '.env', override=False)  # local only; GitHub Actions injects secret directly
+
+PAT          = os.environ['AIRTABLE_TOKEN']
+BASE_ID      = 'app7eJKfcIhJSWQxL'
+PNR_TABLE    = 'tblbAUcnRy1vEdcqd'
+SUP_TABLE    = 'tblA5QBrFm70gq1GP'
+AIRLINE_TABLE= 'tblpGA05gxAM5smOl'
+FIT_TABLE    = 'tblzfcV50F5e5BWlC'
+IT_TABLE     = 'tbliYpzoZE8PhsumL'
+
+GIT_FIELDS = [
+    'fldtKJowPkGFcf26N',  # PNR
+    'fldI8c1pf64qE9Gbw',  # Status (multipleSelects)
+    'fldpCI64sEhlCtiqh',  # Trip Type (singleSelect)
+    'fld2KQBTLCG618vAt',  # Airline Text (formula)
+    'fldkCaY5dZNJC4V0G',  # Source/Supplier (multipleRecordLinks)
+    'fldKr16gFnQW4UcwF',  # Total Ticket (number)
+    'fldhdu4U9pAKyiGux',  # Depart Date (date)
+]
+FIT_FIELDS = [
+    'fldRIdeU0mgWLAyWU',  # Pax (formula)
+    'fldUKFo6d5PYjf5MH',  # Airlines (multipleRecordLinks)
+    'fldQ7fVCjlOh12WEx',  # Depart Date
+    'fld7BZ3QL43t1wCdW',  # Ticketing Status
+]
+IT_FIELDS = [
+    'fldm8KsXvatPGLFaT',  # adult
+    'fldP3gfwNT3lKrYV7',  # child
+    'fldlJ4Jms864MOThr',  # infant
+    'fldDtS2pc4Szv6DNQ',  # Outbound Airlines (multipleRecordLinks)
+    'fldzQszVikRSdTuFG',  # Depart Date
+    'fldQkcH9K364dnae5',  # Ticketing Status
+]
+
+HEADERS = {'Authorization': f'Bearer {PAT}'}
+
+
+def fetch_map(table_id, name_field='Name'):
+    r = requests.get(f'https://api.airtable.com/v0/{BASE_ID}/{table_id}',
+                     headers=HEADERS, params=[('fields[]', name_field)], timeout=30)
+    r.raise_for_status()
+    out = {}
+    for rec in r.json()['records']:
+        out[rec['id']] = rec['fields'].get(name_field, 'Unknown')
+    # handle pagination (Airlines has 44 records, fine with one page)
+    return out
+
+
+def fetch_table(table_id, fields):
+    url = f'https://api.airtable.com/v0/{BASE_ID}/{table_id}'
+    records, offset, page = [], None, 1
+    while True:
+        params = [('pageSize', 100)] + [('fields[]', f) for f in fields]
+        if offset:
+            params.append(('offset', offset))
+        r = requests.get(url, headers=HEADERS, params=params, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        records.extend(data['records'])
+        print(f'  Page {page}: {len(data["records"])} records  (total: {len(records)})')
+        if 'offset' not in data:
+            break
+        offset = data['offset']
+        page += 1
+    return records
+
+
+def make_rec(pnr, status_list, trip_type, airlines, suppliers, tickets, dep_date, source):
+    return {
+        'pnr':         pnr,
+        'status':      status_list,
+        'trip_type':   trip_type,
+        'airlines':    airlines,
+        'suppliers':   suppliers,
+        'tickets':     tickets,
+        'depart_date': dep_date,
+        'year':        dep_date[:4] if dep_date and dep_date[:4].isdigit() and 2020 <= int(dep_date[:4]) <= 2030 else '',
+        'month':       dep_date[:7] if dep_date and dep_date[:4].isdigit() and 2020 <= int(dep_date[:4]) <= 2030 else '',
+        'source':      source,
+    }
+
+
+def process_git(raw, sup_map):
+    out, skipped = [], 0
+    for r in raw:
+        f = r.get('fields', {})
+        status = f.get('Status', [])
+        if 'TICKET CANCELLED' in status:
+            skipped += 1
+            continue
+        sup_ids   = f.get('Source/Supplier', [])
+        suppliers = [sup_map.get(sid, sid) for sid in sup_ids]
+        dep_date  = f.get('Depart Date', '')
+        airline_raw = f.get('Airline Text', '')
+        airlines = [a.strip() for a in airline_raw.split(',') if a.strip()] if airline_raw else []
+        out.append(make_rec(
+            pnr       = f.get('PNR', ''),
+            status_list = status,
+            trip_type = f.get('Trip Type', '') or '',
+            airlines  = airlines,
+            suppliers = suppliers,
+            tickets   = int(f.get('Total Ticket') or 0),
+            dep_date  = dep_date,
+            source    = 'GIT',
+        ))
+    print(f'  Kept {len(out)}, skipped TICKET CANCELLED: {skipped}')
+    return out
+
+
+def process_fit(raw, airline_map):
+    out = []
+    for r in raw:
+        f = r.get('fields', {})
+        dep_date = f.get('Depart Date', '')
+        air_ids  = f.get('Airlines', [])
+        airlines = [airline_map.get(aid, aid) for aid in air_ids]
+        status_val = f.get('Ticketing Status', '')
+        out.append(make_rec(
+            pnr       = '',
+            status_list = [status_val] if status_val else [],
+            trip_type = 'PT',
+            airlines  = airlines,
+            suppliers = [],
+            tickets   = int(f.get('Pax') or 0),
+            dep_date  = dep_date,
+            source    = 'FIT',
+        ))
+    print(f'  FIT processed: {len(out)}')
+    return out
+
+
+def process_it(raw, airline_map):
+    out = []
+    for r in raw:
+        f = r.get('fields', {})
+        dep_date = f.get('Depart Date', '')
+        air_ids  = f.get('Outbound Airlines', [])
+        airlines = [airline_map.get(aid, aid) for aid in air_ids]
+        status_val = f.get('Ticketing Status', '')
+        tickets = int(f.get('adult') or 0) + int(f.get('child') or 0) + int(f.get('infant') or 0)
+        out.append(make_rec(
+            pnr       = '',
+            status_list = [status_val] if status_val else [],
+            trip_type = 'IT',
+            airlines  = airlines,
+            suppliers = [],
+            tickets   = tickets,
+            dep_date  = dep_date,
+            source    = 'IT',
+        ))
+    print(f'  IT processed: {len(out)}')
+    return out
+
+
+HTML_TEMPLATE = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ticket Supply Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f172a;color:#f1f5f9;min-height:100vh}
+::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:#1e293b}::-webkit-scrollbar-thumb{background:#475569;border-radius:3px}
+
+/* Layout */
+.header{background:#1e293b;border-bottom:1px solid #334155;padding:16px 24px;display:flex;align-items:center;justify-content:space-between}
+.header h1{font-size:18px;font-weight:700;color:#f1f5f9;letter-spacing:-.3px}
+.header h1 span{color:#3b82f6}
+.last-fetch{font-size:12px;color:#64748b}
+.container{max-width:1400px;margin:0 auto;padding:20px 24px;display:flex;flex-direction:column;gap:20px}
+
+/* FLOWN / DEPARTING */
+.trip-status-row{display:flex;gap:12px}
+.trip-pill{flex:1;background:#1e293b;border:2px solid #334155;border-radius:12px;padding:16px 20px;cursor:pointer;transition:all .15s;display:flex;justify-content:space-between;align-items:center}
+.trip-pill:hover{border-color:#475569}
+.trip-pill.active-flown{border-color:#64748b;background:#1a2535}
+.trip-pill.active-departing{border-color:#3b82f6;background:#172040}
+.trip-pill .label{font-size:11px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:#94a3b8;margin-bottom:4px}
+.count-row{display:flex;align-items:baseline;gap:6px}
+.sub-row{display:flex;align-items:baseline;gap:5px;margin-top:3px}
+.trip-pill .count{font-size:32px;font-weight:800;color:#f1f5f9;line-height:1}
+.trip-pill .unit{font-size:12px;font-weight:500;color:#475569}
+.sub-row span:first-child{font-size:13px;font-weight:600;color:#64748b}
+.sub-row .unit{font-size:11px;color:#374151}
+.trip-pill.active-flown .label{color:#94a3b8}
+.trip-pill.active-departing .label{color:#60a5fa}
+.trip-pill.active-departing .count{color:#60a5fa}
+.trip-pill .badge{padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.5px}
+.badge-flown{background:#052e16;color:#4ade80;border:1px solid #166534;box-shadow:0 0 8px #22c55e44}
+.badge-dep{background:#1d3461;color:#93c5fd;border:1px solid #1e40af}
+
+/* Filters */
+.filter-bar{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px 20px;display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.filter-group{display:flex;align-items:center;gap:8px}
+.filter-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:#64748b;white-space:nowrap}
+.toggle-group{display:flex;gap:4px}
+.toggle-btn{padding:5px 12px;border-radius:6px;border:1px solid #334155;background:transparent;color:#94a3b8;font-size:12px;font-weight:500;cursor:pointer;transition:all .15s}
+.toggle-btn:hover{border-color:#475569;color:#f1f5f9}
+.toggle-btn.active{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.filter-select{padding:5px 10px;border-radius:6px;border:1px solid #334155;background:#0f172a;color:#f1f5f9;font-size:12px;cursor:pointer;min-width:140px}
+.reset-btn{margin-left:auto;padding:5px 14px;border-radius:6px;border:1px solid #475569;background:transparent;color:#94a3b8;font-size:12px;cursor:pointer;transition:all .15s}
+.reset-btn:hover{border-color:#ef4444;color:#ef4444}
+
+/* Summary cards */
+.summary-row{display:flex;gap:12px;flex-wrap:wrap}
+.card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px 20px;flex:1;min-width:140px}
+.card-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:#64748b;margin-bottom:6px}
+.card-value{font-size:32px;font-weight:800;color:#f1f5f9}
+.card-sub{font-size:12px;color:#64748b;margin-top:4px}
+.status-pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.status-pill{padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid transparent;transition:all .15s;white-space:nowrap}
+.status-pill:hover{filter:brightness(1.2)}
+.status-pill.active-status{outline:2px solid #fff;outline-offset:1px}
+.sp-deposit{background:#431407;color:#fb923c;border-color:#9a3412}
+.sp-fullpayment{background:#052e16;color:#4ade80;border-color:#166534}
+.sp-purchased{background:#172554;color:#60a5fa;border-color:#1e40af}
+.sp-bookingfee{background:#422006;color:#fbbf24;border-color:#92400e}
+.sp-newticket{background:#2e1065;color:#c084fc;border-color:#6b21a8}
+.sp-defer{background:#1c1917;color:#78716c;border-color:#44403c}
+
+/* Charts */
+.charts-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.chart-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px}
+.chart-title{font-size:13px;font-weight:600;color:#94a3b8;margin-bottom:16px;text-transform:uppercase;letter-spacing:.5px}
+.chart-wrap{position:relative}
+
+/* Table */
+.table-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px}
+.table-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.table-title{font-size:13px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px}
+.table-count{font-size:12px;color:#64748b}
+.table-wrap{overflow-x:auto;max-height:420px;overflow-y:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{position:sticky;top:0;background:#162032;color:#64748b;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:10px 12px;text-align:left;border-bottom:1px solid #334155;white-space:nowrap;cursor:pointer;user-select:none}
+th:hover{color:#f1f5f9}
+td{padding:9px 12px;border-bottom:1px solid #1e2d3d;color:#cbd5e1;vertical-align:middle}
+tr:hover td{background:#162032}
+.tt-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
+.tt-GT{background:#1e3a5f;color:#60a5fa}.tt-ITFS{background:#1a3a2a;color:#4ade80}.tt-B2B{background:#3b1f5e;color:#c084fc}.tt-BT{background:#3b2a04;color:#fbbf24}.tt-PT{background:#1f3a3a;color:#22d3ee}.tt-default{background:#1e293b;color:#94a3b8}
+.status-tag{display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:600;margin:1px}
+.fly-badge{padding:3px 8px;border-radius:20px;font-size:10px;font-weight:700;letter-spacing:.4px}
+.fly-flown{background:#1f2937;color:#6b7280}.fly-dep{background:#1d3461;color:#93c5fd}
+.pagination{display:flex;align-items:center;gap:8px;margin-top:14px;justify-content:flex-end}
+.page-btn{padding:4px 10px;border-radius:6px;border:1px solid #334155;background:transparent;color:#94a3b8;font-size:12px;cursor:pointer;transition:all .15s}
+.page-btn:hover:not(:disabled){border-color:#475569;color:#f1f5f9}
+.page-btn:disabled{opacity:.4;cursor:default}
+.page-info{font-size:12px;color:#64748b}
+@media(max-width:900px){.charts-grid{grid-template-columns:1fr}.trip-status-row{flex-direction:column}}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>✈ Ticket <span>Supply</span> Dashboard</h1>
+  <span class="last-fetch">Last fetched: __FETCH_DATE__</span>
+</div>
+
+<div class="container">
+
+  <!-- FLOWN / DEPARTING -->
+  <div class="trip-status-row">
+    <div class="trip-pill" id="pill-flown" onclick="toggleFlown('flown')">
+      <div>
+        <div class="label">Already Flown</div>
+        <div class="count-row"><span class="count" id="flown-tickets">—</span><span class="unit">tickets</span></div>
+        <div class="sub-row"><span id="flown-pnr">—</span><span class="unit">PNR</span></div>
+      </div>
+      <span class="badge badge-flown">FLOWN</span>
+    </div>
+    <div class="trip-pill" id="pill-dep" onclick="toggleFlown('departing')">
+      <div>
+        <div class="label">Upcoming / Departing</div>
+        <div class="count-row"><span class="count" id="dep-tickets">—</span><span class="unit">tickets</span></div>
+        <div class="sub-row"><span id="dep-pnr">—</span><span class="unit">PNR</span></div>
+      </div>
+      <span class="badge badge-dep">DEPARTING</span>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="filter-bar">
+    <div class="filter-group">
+      <span class="filter-label">Year</span>
+      <div class="toggle-group" id="year-toggles"></div>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">Type</span>
+      <div class="toggle-group" id="type-toggles"></div>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">Airline</span>
+      <select class="filter-select" id="airline-sel" onchange="setFilter('airline',this.value)">
+        <option value="all">All Airlines</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">Supplier</span>
+      <select class="filter-select" id="supplier-sel" onchange="setFilter('supplier',this.value)">
+        <option value="all">All Suppliers</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">Source</span>
+      <div class="toggle-group" id="source-toggles"></div>
+    </div>
+    <button class="reset-btn" onclick="resetFilters()">Reset</button>
+  </div>
+
+  <!-- Summary cards -->
+  <div class="summary-row">
+    <div class="card">
+      <div class="card-label">Total Tickets</div>
+      <div class="card-value" id="c-tickets">—</div>
+      <div class="card-sub" id="c-tickets-sub"></div>
+    </div>
+    <div class="card">
+      <div class="card-label">PNRs</div>
+      <div class="card-value" id="c-pnrs">—</div>
+      <div class="card-sub" id="c-pnrs-sub"></div>
+    </div>
+    <div class="card" style="flex:3">
+      <div class="card-label">Status Breakdown <span style="font-weight:400;text-transform:none;letter-spacing:0;color:#475569">(click to filter)</span></div>
+      <div class="status-pills" id="status-pills"></div>
+    </div>
+  </div>
+
+  <!-- Charts -->
+  <div class="charts-grid">
+    <div class="chart-card">
+      <div class="chart-title">By Airline</div>
+      <div class="chart-wrap"><canvas id="chart-airline" height="220"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">By Supplier</div>
+      <div class="chart-wrap"><canvas id="chart-supplier" height="220"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">By Trip Type</div>
+      <div class="chart-wrap" style="display:flex;justify-content:center"><canvas id="chart-type" width="260" height="220" style="max-width:260px"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Tickets by Month</div>
+      <div class="chart-wrap"><canvas id="chart-month" height="220"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="table-card">
+    <div class="table-header">
+      <span class="table-title">PNR Records</span>
+      <span class="table-count" id="tbl-count"></span>
+    </div>
+    <div class="table-wrap">
+      <table id="pnr-table">
+        <thead>
+          <tr>
+            <th onclick="sortTable('source')">Source</th>
+            <th onclick="sortTable('pnr')">PNR</th>
+            <th onclick="sortTable('trip_type')">Type</th>
+            <th onclick="sortTable('airlines')">Airline</th>
+            <th onclick="sortTable('suppliers')">Supplier</th>
+            <th onclick="sortTable('tickets')" style="text-align:right">Pax</th>
+            <th onclick="sortTable('depart_date')">Depart Date</th>
+            <th>Status</th>
+            <th>Journey</th>
+          </tr>
+        </thead>
+        <tbody id="pnr-tbody"></tbody>
+      </table>
+    </div>
+    <div class="pagination">
+      <button class="page-btn" id="btn-prev" onclick="changePage(-1)">← Prev</button>
+      <span class="page-info" id="page-info"></span>
+      <button class="page-btn" id="btn-next" onclick="changePage(1)">Next →</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const DATA = __DATA_JSON__;
+const TODAY = '__TODAY__';
+const PAGE_SIZE = 50;
+
+// ── State ──────────────────────────────────────────────────────────────────
+const state = {
+  year: 'all', tripType: 'all', airline: 'all', supplier: 'all', source: 'all',
+  flownFilter: null,   // null | 'flown' | 'departing'
+  statusFilter: null,  // null | status string
+  sortKey: 'depart_date', sortAsc: true,
+  page: 0,
+};
+
+function isFlown(r) { return r.depart_date && r.depart_date < TODAY; }
+
+// ── Filter / sort ──────────────────────────────────────────────────────────
+function filtered() {
+  return DATA.filter(r => {
+    if (state.year !== 'all' && r.year !== state.year) return false;
+    if (state.tripType !== 'all' && r.trip_type !== state.tripType) return false;
+    if (state.airline !== 'all' && !r.airlines.includes(state.airline)) return false;
+    if (state.supplier !== 'all' && !r.suppliers.includes(state.supplier)) return false;
+    if (state.source !== 'all' && r.source !== state.source) return false;
+    if (state.flownFilter === 'flown' && !isFlown(r)) return false;
+    if (state.flownFilter === 'departing' && isFlown(r)) return false;
+    if (state.statusFilter && !r.status.includes(state.statusFilter)) return false;
+    return true;
+  }).sort((a, b) => {
+    let va = a[state.sortKey], vb = b[state.sortKey];
+    if (Array.isArray(va)) va = va.join();
+    if (Array.isArray(vb)) vb = vb.join();
+    if (typeof va === 'number') return state.sortAsc ? va - vb : vb - va;
+    return state.sortAsc ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
+  });
+}
+
+// ── Chart instances ────────────────────────────────────────────────────────
+Chart.register(ChartDataLabels);
+Chart.defaults.set('plugins.datalabels', { display: false });
+
+const charts = {};
+
+function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
+
+// ── Colour helpers ─────────────────────────────────────────────────────────
+const PALETTE = ['#3b82f6','#22c55e','#a855f7','#f59e0b','#06b6d4','#ec4899','#f97316','#84cc16','#14b8a6','#8b5cf6','#ef4444','#6366f1'];
+function pal(i) { return PALETTE[i % PALETTE.length]; }
+const TYPE_COLORS = {GT:'#3b82f6',ITFS:'#22c55e',B2B:'#a855f7',BT:'#f59e0b',PT:'#06b6d4'};
+function typeColor(t) { return TYPE_COLORS[t] || '#94a3b8'; }
+
+const STATUS_CFG = {
+  'DEPOSIT DONE':     {cls:'sp-deposit',    label:'DEPOSIT'},
+  'FULLPAYMENT DONE': {cls:'sp-fullpayment', label:'FP DONE'},
+  'PURCHASED':        {cls:'sp-purchased',   label:'PURCHASED'},
+  'BOOKING FEE DONE': {cls:'sp-bookingfee',  label:'BF DONE'},
+  'NEW TICKET':       {cls:'sp-newticket',   label:'NEW'},
+  'DEFER':            {cls:'sp-defer',       label:'DEFER'},
+  'DONE PURCHASE':    {cls:'sp-fullpayment', label:'DONE'},
+  'POSTED':           {cls:'sp-purchased',   label:'POSTED'},
+  'REQUEST':          {cls:'sp-newticket',   label:'REQUEST'},
+};
+
+// ── Aggregate helpers ──────────────────────────────────────────────────────
+function sumBy(rows, keyFn) {
+  const m = {};
+  rows.forEach(r => {
+    const keys = keyFn(r);
+    (Array.isArray(keys) ? keys : [keys]).forEach(k => {
+      if (!k) return;
+      m[k] = (m[k] || 0) + (r.tickets || 0);
+    });
+  });
+  return Object.entries(m).sort((a, b) => b[1] - a[1]);
+}
+
+// ── Main update ────────────────────────────────────────────────────────────
+function updateAll() {
+  const rows = filtered();
+  updateFlownPills(rows);
+  updateCards(rows);
+  updateChartAirline(rows);
+  updateChartSupplier(rows);
+  updateChartType(rows);
+  updateChartMonth(rows);
+  updateTable(rows);
+}
+
+// ── FLOWN / DEPARTING pills ────────────────────────────────────────────────
+function updateFlownPills(rows) {
+  // Always compute from base data (respect other filters but show both counts)
+  const baseRows = filtered();
+  const flown    = baseRows.filter(r => isFlown(r));
+  const dep      = baseRows.filter(r => !isFlown(r));
+  const fmt = n => n.toLocaleString();
+
+  el('flown-tickets').textContent = fmt(flown.reduce((s,r)=>s+r.tickets,0));
+  el('flown-pnr').textContent     = fmt(flown.length);
+  el('dep-tickets').textContent   = fmt(dep.reduce((s,r)=>s+r.tickets,0));
+  el('dep-pnr').textContent       = fmt(dep.length);
+
+  el('pill-flown').className = 'trip-pill' + (state.flownFilter === 'flown' ? ' active-flown' : '');
+  el('pill-dep').className   = 'trip-pill' + (state.flownFilter === 'departing' ? ' active-departing' : '');
+}
+
+// ── Summary cards ──────────────────────────────────────────────────────────
+function updateCards(rows) {
+  const totalTix = rows.reduce((s, r) => s + r.tickets, 0);
+  el('c-pnrs').textContent    = rows.length.toLocaleString();
+  el('c-tickets').textContent = totalTix.toLocaleString();
+
+  // Status breakdown
+  const statusCounts = {};
+  rows.forEach(r => r.status.forEach(s => { statusCounts[s] = (statusCounts[s]||0)+1; }));
+  const piEl = el('status-pills');
+  piEl.innerHTML = '';
+  Object.entries(statusCounts).sort((a,b)=>b[1]-a[1]).forEach(([s, cnt]) => {
+    const cfg = STATUS_CFG[s] || {cls:'sp-deposit', label:s};
+    const p = document.createElement('span');
+    p.className = `status-pill ${cfg.cls}` + (state.statusFilter === s ? ' active-status' : '');
+    p.textContent = `${cfg.label}: ${cnt}`;
+    p.onclick = () => { state.statusFilter = state.statusFilter === s ? null : s; state.page=0; updateAll(); };
+    piEl.appendChild(p);
+  });
+}
+
+// ── Charts ─────────────────────────────────────────────────────────────────
+const CHART_DEFAULTS = {
+  plugins: { legend: { display: false } },
+  scales: {
+    x: { ticks: { color: '#94a3b8', font:{size:11} }, grid: { color: '#1e293b' } },
+    y: { ticks: { color: '#94a3b8', font:{size:11} }, grid: { color: '#334155' } },
+  },
+};
+
+const BAR_DATALABELS = {
+  display: true,
+  anchor: 'end',
+  align: 'right',
+  color: '#64748b',
+  font: { size: 10, weight: '600' },
+  formatter: v => v.toLocaleString(),
+};
+
+function updateChartAirline(rows) {
+  const data = sumBy(rows, r => r.airlines).slice(0, 12);
+  destroyChart('airline');
+  charts['airline'] = new Chart(el('chart-airline'), {
+    type: 'bar',
+    data: {
+      labels: data.map(d=>d[0]),
+      datasets: [{ data: data.map(d=>d[1]), backgroundColor: data.map((_,i)=>pal(i)), borderRadius:4 }],
+    },
+    options: { ...CHART_DEFAULTS, indexAxis:'y',
+      layout: { padding: { right: 48 } },
+      plugins:{ legend:{display:false}, datalabels: BAR_DATALABELS },
+      scales:{x:{...CHART_DEFAULTS.scales.x},y:{...CHART_DEFAULTS.scales.y,ticks:{color:'#94a3b8',font:{size:11}}}} },
+  });
+}
+
+function updateChartSupplier(rows) {
+  const data = sumBy(rows, r => r.suppliers).slice(0, 12);
+  destroyChart('supplier');
+  charts['supplier'] = new Chart(el('chart-supplier'), {
+    type: 'bar',
+    data: {
+      labels: data.map(d=>d[0]),
+      datasets: [{ data: data.map(d=>d[1]), backgroundColor: data.map((_,i)=>pal(i+4)), borderRadius:4 }],
+    },
+    options: { ...CHART_DEFAULTS, indexAxis:'y',
+      layout: { padding: { right: 48 } },
+      plugins:{ legend:{display:false}, datalabels: BAR_DATALABELS },
+      scales:{x:{...CHART_DEFAULTS.scales.x},y:{...CHART_DEFAULTS.scales.y,ticks:{color:'#94a3b8',font:{size:11}}}} },
+  });
+}
+
+function updateChartType(rows) {
+  const data = sumBy(rows, r => r.trip_type || 'Unknown');
+  destroyChart('type');
+  charts['type'] = new Chart(el('chart-type'), {
+    type: 'doughnut',
+    data: {
+      labels: data.map(d=>d[0]),
+      datasets: [{ data: data.map(d=>d[1]),
+        backgroundColor: data.map(d=>typeColor(d[0])),
+        borderColor:'#0f172a', borderWidth:2, hoverOffset:6 }],
+    },
+    options: {
+      plugins: { legend: { display:true, position:'bottom',
+        labels:{ color:'#94a3b8', font:{size:11}, padding:10, boxWidth:12 } } },
+    },
+  });
+}
+
+function updateChartMonth(rows) {
+  // Collect months present in filtered data
+  const monthTix = {};
+  rows.forEach(r => {
+    if (!r.month) return;
+    if (!monthTix[r.month]) monthTix[r.month] = {};
+    const tt = r.trip_type || 'Other';
+    monthTix[r.month][tt] = (monthTix[r.month][tt]||0) + r.tickets;
+  });
+  const months = Object.keys(monthTix).sort();
+  const types  = [...new Set(rows.map(r=>r.trip_type||'Other'))].sort();
+
+  destroyChart('month');
+  charts['month'] = new Chart(el('chart-month'), {
+    type: 'bar',
+    data: {
+      labels: months.map(m => {
+        const d = new Date(m+'-01');
+        return d.toLocaleDateString('en-MY',{month:'short',year:'2-digit'});
+      }),
+      datasets: types.map((t,i) => ({
+        label: t,
+        data: months.map(m => (monthTix[m]||{})[t]||0),
+        backgroundColor: typeColor(t),
+        borderRadius: 3,
+        stack: 'stack',
+      })),
+    },
+    options: { ...CHART_DEFAULTS,
+      plugins: { legend: { display:true, labels:{ color:'#94a3b8', font:{size:11}, boxWidth:12 } } },
+      scales: {
+        x: { stacked:true, ...CHART_DEFAULTS.scales.x },
+        y: { stacked:true, ...CHART_DEFAULTS.scales.y },
+      },
+    },
+  });
+}
+
+// ── Table ──────────────────────────────────────────────────────────────────
+let _tableRows = [];
+
+function updateTable(rows) {
+  _tableRows = rows;
+  state.page = 0;
+  renderPage();
+}
+
+function renderPage() {
+  const rows  = _tableRows;
+  const start = state.page * PAGE_SIZE;
+  const end   = Math.min(start + PAGE_SIZE, rows.length);
+  const page  = rows.slice(start, end);
+  const tbody = el('pnr-tbody');
+  tbody.innerHTML = '';
+
+  page.forEach(r => {
+    const flown = isFlown(r);
+    const tr = document.createElement('tr');
+    const ttCls = 'tt-' + (r.trip_type || 'default');
+    const sStr  = r.status.map(s => {
+      const cfg = STATUS_CFG[s]||{cls:'sp-defer',label:s};
+      return `<span class="status-tag ${cfg.cls}">${cfg.label}</span>`;
+    }).join('');
+    const srcColor = r.source==='GIT'?'#3b82f6':r.source==='FIT'?'#a855f7':'#06b6d4';
+    tr.innerHTML = `
+      <td><span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;background:${srcColor}22;color:${srcColor};border:1px solid ${srcColor}44">${r.source}</span></td>
+      <td style="font-family:monospace;font-size:12px;font-weight:600;color:#93c5fd">${r.pnr||'—'}</td>
+      <td><span class="tt-badge ${ttCls}">${r.trip_type||'—'}</span></td>
+      <td>${r.airlines.join(', ')||'—'}</td>
+      <td style="color:#94a3b8;font-size:12px">${r.suppliers.join(', ')||'—'}</td>
+      <td style="text-align:right;font-weight:600;color:#f1f5f9">${r.tickets}</td>
+      <td style="font-size:12px;color:#94a3b8">${r.depart_date||'—'}</td>
+      <td>${sStr}</td>
+      <td><span class="fly-badge ${flown?'fly-flown':'fly-dep'}">${flown?'FLOWN':'DEPARTING'}</span></td>`;
+    tbody.appendChild(tr);
+  });
+
+  const total = rows.length;
+  const pages = Math.ceil(total / PAGE_SIZE) || 1;
+  el('tbl-count').textContent = total ? `${start+1}–${end} of ${total.toLocaleString()} records` : '0 records';
+  el('page-info').textContent = `Page ${state.page+1} / ${pages}`;
+  el('btn-prev').disabled = state.page === 0;
+  el('btn-next').disabled = state.page >= pages - 1;
+}
+
+function changePage(dir) {
+  state.page += dir;
+  renderPage();
+}
+
+function sortTable(key) {
+  if (state.sortKey === key) state.sortAsc = !state.sortAsc;
+  else { state.sortKey = key; state.sortAsc = true; }
+  state.page = 0;
+  updateTable(filtered());
+}
+
+// ── Filter setters ─────────────────────────────────────────────────────────
+function setFilter(key, val) { state[key] = val; state.page=0; updateAll(); }
+
+function toggleFlown(v) {
+  state.flownFilter = state.flownFilter === v ? null : v;
+  state.page = 0;
+  updateAll();
+}
+
+function resetFilters() {
+  state.year='all'; state.tripType='all'; state.airline='all';
+  state.supplier='all'; state.source='all'; state.flownFilter=null; state.statusFilter=null; state.page=0;
+  document.querySelectorAll('.toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.val==='all'));
+  el('airline-sel').value='all'; el('supplier-sel').value='all';
+  updateAll();
+}
+
+// ── Bootstrap filters from data ────────────────────────────────────────────
+function buildFilters() {
+  // Years
+  const years = [...new Set(DATA.map(r=>r.year).filter(Boolean))].sort();
+  const yearEl = el('year-toggles');
+  ['all',...years].forEach(y => {
+    const b = document.createElement('button');
+    b.className = 'toggle-btn' + (y==='all'?' active':'');
+    b.dataset.val = y; b.textContent = y==='all'?'All':y;
+    b.onclick = () => {
+      document.querySelectorAll('#year-toggles .toggle-btn').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active'); setFilter('year', y);
+    };
+    yearEl.appendChild(b);
+  });
+
+  // Trip types
+  const types = [...new Set(DATA.map(r=>r.trip_type).filter(Boolean))].sort();
+  const typeEl = el('type-toggles');
+  ['all',...types].forEach(t => {
+    const b = document.createElement('button');
+    b.className = 'toggle-btn' + (t==='all'?' active':'');
+    b.dataset.val = t; b.textContent = t==='all'?'All':t;
+    b.onclick = () => {
+      document.querySelectorAll('#type-toggles .toggle-btn').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active'); setFilter('tripType', t);
+    };
+    typeEl.appendChild(b);
+  });
+
+  // Sources
+  const sources = [...new Set(DATA.map(r=>r.source).filter(Boolean))].sort();
+  const srcEl = el('source-toggles');
+  ['all',...sources].forEach(s => {
+    const b = document.createElement('button');
+    b.className = 'toggle-btn' + (s==='all'?' active':'');
+    b.dataset.val = s; b.textContent = s==='all'?'All':s;
+    b.onclick = () => {
+      document.querySelectorAll('#source-toggles .toggle-btn').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active'); setFilter('source', s);
+    };
+    srcEl.appendChild(b);
+  });
+
+  // Airlines
+  const airlines = [...new Set(DATA.flatMap(r=>r.airlines))].sort();
+  const airSel = el('airline-sel');
+  airlines.forEach(a => {
+    const o = document.createElement('option'); o.value=a; o.textContent=a; airSel.appendChild(o);
+  });
+
+  // Suppliers
+  const sups = [...new Set(DATA.flatMap(r=>r.suppliers))].sort();
+  const supSel = el('supplier-sel');
+  sups.forEach(s => {
+    const o = document.createElement('option'); o.value=s; o.textContent=s; supSel.appendChild(o);
+  });
+}
+
+function el(id) { return document.getElementById(id); }
+
+// ── Init ───────────────────────────────────────────────────────────────────
+buildFilters();
+updateAll();
+</script>
+</body>
+</html>"""
+
+
+def generate_html(records, fetch_date):
+    data_json = json.dumps(records, ensure_ascii=False, separators=(',', ':'))
+    html = HTML_TEMPLATE \
+        .replace('__DATA_JSON__', data_json) \
+        .replace('__TODAY__', date.today().isoformat()) \
+        .replace('__FETCH_DATE__', fetch_date)
+    out = Path(__file__).parent / 'dashboard.html'
+    out.write_text(html, encoding='utf-8')
+    print(f'  Written: {out}')
+
+
+def main():
+    from datetime import datetime
+    fetch_date = datetime.now().strftime('%d %b %Y %H:%M')
+
+    print('Loading lookup maps...')
+    sup_map     = fetch_map(SUP_TABLE)
+    airline_map = fetch_map(AIRLINE_TABLE)
+    print(f'  {len(sup_map)} suppliers, {len(airline_map)} airlines')
+
+    print('\nFetching GIT PNR records...')
+    git_raw = fetch_table(PNR_TABLE, GIT_FIELDS)
+    git_recs = process_git(git_raw, sup_map)
+
+    print('\nFetching FIT Table records...')
+    fit_raw = fetch_table(FIT_TABLE, FIT_FIELDS)
+    fit_recs = process_fit(fit_raw, airline_map)
+
+    print('\nFetching IT Table (CRM IT) records...')
+    it_raw = fetch_table(IT_TABLE, IT_FIELDS)
+    it_recs = process_it(it_raw, airline_map)
+
+    records = git_recs + fit_recs + it_recs
+    total_tix = sum(r['tickets'] for r in records)
+
+    print(f'\nCombined: GIT {len(git_recs)} + FIT {len(fit_recs)} + IT {len(it_recs)} = {len(records)} records')
+    print(f'Total pax/tickets: {total_tix:,}')
+
+    print('\nGenerating dashboard.html...')
+    generate_html(records, fetch_date)
+    print(f'Open: {Path(__file__).parent / "dashboard.html"}')
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,35 @@
+name: Refresh Dashboard
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'   # every 6 hours: 12am, 6am, 12pm, 6pm UTC
+  workflow_dispatch:          # manual trigger from GitHub UI anytime
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests python-dotenv
+
+      - name: Build dashboard
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+        run: python build_dashboard.py
+
+      - name: Deploy index.html
+        run: cp dashboard.html index.html
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add index.html
+          git diff --staged --quiet || git commit -m "Auto-refresh $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git push
