@@ -386,7 +386,7 @@ tr:hover td{background:#162032}
 </div>
 
 <script>
-const DATA = __DATA_JSON__;
+let DATA = [];
 const TODAY = '__TODAY__';
 const PAGE_SIZE = 50;
 
@@ -423,7 +423,9 @@ function filtered() {
 }
 
 // ── Chart instances ────────────────────────────────────────────────────────
-Chart.register(ChartDataLabels);
+if (typeof ChartDataLabels !== 'undefined') {
+  Chart.register(ChartDataLabels);
+}
 Chart.defaults.set('plugins.datalabels', { display: false });
 
 const charts = {};
@@ -520,14 +522,14 @@ const CHART_DEFAULTS = {
   },
 };
 
-const BAR_DATALABELS = {
+const BAR_DATALABELS = typeof ChartDataLabels !== 'undefined' ? {
   display: true,
   anchor: 'end',
   align: 'right',
   color: '#64748b',
   font: { size: 10, weight: '600' },
   formatter: v => v.toLocaleString(),
-};
+} : { display: false };
 
 function updateChartAirline(rows) {
   const data = sumBy(rows, r => r.airlines).slice(0, 12);
@@ -755,17 +757,28 @@ function buildFilters() {
 function el(id) { return document.getElementById(id); }
 
 // ── Init ───────────────────────────────────────────────────────────────────
-buildFilters();
-updateAll();
+fetch('data.json')
+  .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+  .then(d => { DATA = d; buildFilters(); updateAll(); })
+  .catch(e => {
+    document.body.insertAdjacentHTML('afterbegin',
+      `<div style="background:#7f1d1d;color:#fca5a5;padding:12px 24px;font-size:13px">
+        ⚠ Failed to load data.json: ${e}. Make sure you're serving via HTTP, not file://.
+      </div>`);
+  });
 </script>
 </body>
 </html>"""
 
 
 def generate_html(records, fetch_date):
+    # Write data separately so HTML stays lightweight
     data_json = json.dumps(records, ensure_ascii=False, separators=(',', ':'))
+    data_out = Path(__file__).parent / 'data.json'
+    data_out.write_text(data_json, encoding='utf-8')
+    print(f'  Written: {data_out} ({len(data_json)//1024}KB)')
+
     html = HTML_TEMPLATE \
-        .replace('__DATA_JSON__', data_json) \
         .replace('__TODAY__', date.today().isoformat()) \
         .replace('__FETCH_DATE__', fetch_date)
     out = Path(__file__).parent / 'dashboard.html'
