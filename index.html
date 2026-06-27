@@ -150,7 +150,7 @@ tr:hover td{background:#162032}
 <div id="app" style="display:none">
 <div class="header">
   <h1>✈ Ticket <span>Supply</span> Dashboard</h1>
-  <span class="last-fetch">Last fetched: 27 Jun 2026 16:56</span>
+  <span class="last-fetch">Last fetched: 27 Jun 2026 16:59</span>
 </div>
 
 <div class="container">
@@ -338,6 +338,8 @@ function filtered() {
 if (typeof ChartDataLabels !== 'undefined') {
   Chart.register(ChartDataLabels);
 }
+Chart.defaults.font.family = "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";
+Chart.defaults.font.size = 11;
 Chart.defaults.set('plugins.datalabels', { display: false });
 
 const charts = {};

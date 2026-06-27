@@ -476,6 +476,8 @@ function filtered() {
 if (typeof ChartDataLabels !== 'undefined') {
   Chart.register(ChartDataLabels);
 }
+Chart.defaults.font.family = "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";
+Chart.defaults.font.size = 11;
 Chart.defaults.set('plugins.datalabels', { display: false });
 
 const charts = {};
