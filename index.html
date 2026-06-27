@@ -32,16 +32,17 @@
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f172a;color:#f1f5f9;min-height:100vh}
 
 /* Password gate */
-#gate{position:fixed;inset:0;background:#0d0b09;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999;gap:0}
+#gate{position:fixed;inset:0;background:#0c0c0c;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999}
 #gate.hidden{display:none}
-.gate-eyebrow{font-family:monospace;font-size:11px;letter-spacing:.22em;color:#5a5550;text-transform:uppercase;margin-bottom:24px}
-.gate-title{font-family:'Palatino Linotype',Palatino,'Book Antiqua',Georgia,serif;font-size:34px;font-weight:700;color:#e8e2da;margin-bottom:36px;text-align:center;line-height:1.25;letter-spacing:-.3px;-webkit-font-smoothing:antialiased}
-.gate-input{width:480px;max-width:90vw;padding:18px 24px;border-radius:14px;border:1.5px solid #2a2520;background:#141210;color:#f5f0ea;font-family:monospace;font-size:16px;outline:none;transition:border-color .2s;text-align:center}
-.gate-input::placeholder{color:#4a4540}
+.gate-wrap{display:flex;flex-direction:column;align-items:center;gap:0;width:280px}
+.gate-eyebrow{font-family:monospace;font-size:10px;letter-spacing:.28em;color:#484440;text-transform:uppercase;margin-bottom:16px;white-space:nowrap}
+.gate-title{font-family:Georgia,'Times New Roman',serif;font-size:26px;font-weight:700;color:#ddd8d0;margin-bottom:28px;text-align:center;line-height:1.2;letter-spacing:-.2px;-webkit-font-smoothing:antialiased}
+.gate-input{width:100%;padding:13px 16px;border-radius:10px;border:1px solid #282420;background:#181614;color:#d8d0c8;font-family:monospace;font-size:13px;outline:none;transition:border-color .2s;text-align:center;letter-spacing:.05em}
+.gate-input::placeholder{color:#3e3a36}
 .gate-input:focus{border-color:#3a3530}
-.gate-btn{width:480px;max-width:90vw;padding:18px 24px;border-radius:14px;border:none;background:#f5f0ea;color:#0d0b09;font-size:17px;font-weight:600;cursor:pointer;margin-top:12px;transition:background .15s;font-family:monospace;letter-spacing:.05em}
-.gate-btn:hover{background:#fffdf9}
-.gate-error{color:#ef4444;font-size:13px;margin-top:10px;font-family:monospace;opacity:0;transition:opacity .2s}
+.gate-btn{width:100%;padding:13px 16px;border-radius:10px;border:none;background:#ede8e0;color:#111;font-size:13px;font-weight:700;cursor:pointer;margin-top:8px;transition:background .15s;font-family:monospace;letter-spacing:.08em;text-transform:uppercase}
+.gate-btn:hover{background:#f8f4ee}
+.gate-error{color:#c0392b;font-size:11px;margin-top:10px;font-family:monospace;letter-spacing:.05em;opacity:0;transition:opacity .2s}
 .gate-error.show{opacity:1}
 ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:#1e293b}::-webkit-scrollbar-thumb{background:#475569;border-radius:3px}
 
@@ -137,17 +138,19 @@ tr:hover td{background:#162032}
 
 <!-- Password gate -->
 <div id="gate">
-  <div class="gate-eyebrow">Arba Travel &nbsp;·&nbsp; Ops</div>
-  <div class="gate-title">Ticket Supply<br>Dashboard</div>
-  <input id="gate-pwd" class="gate-input" type="password" placeholder="Enter password" onkeydown="if(event.key==='Enter')unlock()">
-  <button class="gate-btn" onclick="unlock()">Unlock</button>
-  <div class="gate-error" id="gate-err">Incorrect password</div>
+  <div class="gate-wrap">
+    <div class="gate-eyebrow">Arba Travel &nbsp;·&nbsp; Ops</div>
+    <div class="gate-title">Ticket Supply Dashboard</div>
+    <input id="gate-pwd" class="gate-input" type="password" placeholder="Enter password" onkeydown="if(event.key==='Enter')unlock()">
+    <button class="gate-btn" onclick="unlock()">Unlock</button>
+    <div class="gate-error" id="gate-err">Incorrect password</div>
+  </div>
 </div>
 
 <div id="app" style="display:none">
 <div class="header">
   <h1>✈ Ticket <span>Supply</span> Dashboard</h1>
-  <span class="last-fetch">Last fetched: 27 Jun 2026 16:50</span>
+  <span class="last-fetch">Last fetched: 27 Jun 2026 16:53</span>
 </div>
 
 <div class="container">
