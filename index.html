@@ -99,9 +99,10 @@ tr:hover td{background:#162032}
 </head>
 <body>
 
+<div id="dbg-bar" style="background:#1e3a5f;color:#93c5fd;padding:6px 24px;font-size:12px;display:none"></div>
 <div class="header">
   <h1>✈ Ticket <span>Supply</span> Dashboard</h1>
-  <span class="last-fetch">Last fetched: 27 Jun 2026 08:12</span>
+  <span class="last-fetch">Last fetched: 27 Jun 2026 08:18</span>
 </div>
 
 <div class="container">
@@ -598,13 +599,25 @@ function buildFilters() {
 function el(id) { return document.getElementById(id); }
 
 // ── Init ───────────────────────────────────────────────────────────────────
+function dbg(msg) {
+  const d = document.getElementById('dbg-bar');
+  if (!d) return;
+  if (msg) { d.style.display = 'block'; d.textContent = msg; }
+  else { d.style.display = 'none'; }
+}
 fetch('data.json')
-  .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-  .then(d => { DATA = d; buildFilters(); updateAll(); })
+  .then(r => { dbg('fetch ok ' + r.status); if (!r.ok) throw new Error(r.status); return r.json(); })
+  .then(d => {
+    dbg('parsed ' + d.length + ' records, building…');
+    DATA = d;
+    try { buildFilters(); } catch(e) { dbg('buildFilters ERROR: ' + e); throw e; }
+    try { updateAll(); } catch(e) { dbg('updateAll ERROR: ' + e); throw e; }
+    dbg('');
+  })
   .catch(e => {
     document.body.insertAdjacentHTML('afterbegin',
-      `<div style="background:#7f1d1d;color:#fca5a5;padding:12px 24px;font-size:13px">
-        ⚠ Failed to load data.json: ${e}. Make sure you're serving via HTTP, not file://.
+      `<div id="dbg-bar" style="background:#7f1d1d;color:#fca5a5;padding:10px 24px;font-size:13px">
+        ⚠ ${e}
       </div>`);
   });
 </script>
