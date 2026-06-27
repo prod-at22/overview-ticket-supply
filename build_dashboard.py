@@ -168,6 +168,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f172a;color:#f1f5f9;min-height:100vh}
+
+/* Password gate */
+#gate{position:fixed;inset:0;background:#0d0b09;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999;gap:0}
+#gate.hidden{display:none}
+.gate-eyebrow{font-family:monospace;font-size:12px;letter-spacing:.25em;color:#6b6660;text-transform:uppercase;margin-bottom:28px}
+.gate-eyebrow span{color:#6b6660}
+.gate-title{font-family:Georgia,'Times New Roman',serif;font-size:52px;font-weight:700;color:#f5f0ea;margin-bottom:40px;text-align:center;line-height:1.1}
+.gate-input{width:480px;max-width:90vw;padding:18px 24px;border-radius:14px;border:1.5px solid #2a2520;background:#141210;color:#f5f0ea;font-family:monospace;font-size:16px;outline:none;transition:border-color .2s;text-align:center}
+.gate-input::placeholder{color:#4a4540}
+.gate-input:focus{border-color:#3a3530}
+.gate-btn{width:480px;max-width:90vw;padding:18px 24px;border-radius:14px;border:none;background:#f5f0ea;color:#0d0b09;font-size:17px;font-weight:600;cursor:pointer;margin-top:12px;transition:background .15s;font-family:monospace;letter-spacing:.05em}
+.gate-btn:hover{background:#fffdf9}
+.gate-error{color:#ef4444;font-size:13px;margin-top:10px;font-family:monospace;opacity:0;transition:opacity .2s}
+.gate-error.show{opacity:1}
 ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:#1e293b}::-webkit-scrollbar-thumb{background:#475569;border-radius:3px}
 
 /* Layout */
@@ -259,6 +273,17 @@ tr:hover td{background:#162032}
 <body>
 
 <script id="payload" type="application/json">__DATA_JSON__</script>
+
+<!-- Password gate -->
+<div id="gate">
+  <div class="gate-eyebrow">Arba Travel &nbsp;·&nbsp; Ops</div>
+  <div class="gate-title">Ticket Supply<br>Dashboard</div>
+  <input id="gate-pwd" class="gate-input" type="password" placeholder="Enter password" onkeydown="if(event.key==='Enter')unlock()">
+  <button class="gate-btn" onclick="unlock()">Unlock</button>
+  <div class="gate-error" id="gate-err">Incorrect password</div>
+</div>
+
+<div id="app" style="display:none">
 <div class="header">
   <h1>✈ Ticket <span>Supply</span> Dashboard</h1>
   <span class="last-fetch">Last fetched: __FETCH_DATE__</span>
@@ -385,8 +410,30 @@ tr:hover td{background:#162032}
   </div>
 
 </div>
+</div><!-- #app -->
 
 <script>
+// ── Gate ──────────────────────────────────────────────────────────────────
+(function(){
+  const KEY = 'tsd_auth';
+  if (sessionStorage.getItem(KEY) === '1') showApp();
+  function showApp() {
+    document.getElementById('gate').classList.add('hidden');
+    document.getElementById('app').style.display = '';
+  }
+  window.unlock = function() {
+    const v = document.getElementById('gate-pwd').value;
+    if (v === 'arba2026') { sessionStorage.setItem(KEY,'1'); showApp(); }
+    else {
+      const err = document.getElementById('gate-err');
+      err.classList.add('show');
+      setTimeout(()=>err.classList.remove('show'), 2000);
+      document.getElementById('gate-pwd').value = '';
+      document.getElementById('gate-pwd').focus();
+    }
+  };
+})();
+
 const DATA = JSON.parse(document.getElementById('payload').textContent);
 const TODAY = '__TODAY__';
 const PAGE_SIZE = 50;
