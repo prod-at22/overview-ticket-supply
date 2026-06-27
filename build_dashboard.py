@@ -170,17 +170,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f172a;color:#f1f5f9;min-height:100vh}
 
 /* Password gate */
-#gate{position:fixed;inset:0;background:#0c0c0c;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999}
+#gate{position:fixed;inset:0;background:#0f172a;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999}
 #gate.hidden{display:none}
 .gate-wrap{display:flex;flex-direction:column;align-items:center;gap:0;width:280px}
-.gate-eyebrow{font-family:monospace;font-size:10px;letter-spacing:.28em;color:#484440;text-transform:uppercase;margin-bottom:16px;white-space:nowrap}
-.gate-title{font-family:Georgia,'Times New Roman',serif;font-size:26px;font-weight:700;color:#ddd8d0;margin-bottom:28px;text-align:center;line-height:1.2;letter-spacing:-.2px;-webkit-font-smoothing:antialiased}
-.gate-input{width:100%;padding:13px 16px;border-radius:10px;border:1px solid #282420;background:#181614;color:#d8d0c8;font-family:monospace;font-size:13px;outline:none;transition:border-color .2s;text-align:center;letter-spacing:.05em}
-.gate-input::placeholder{color:#3e3a36}
-.gate-input:focus{border-color:#3a3530}
-.gate-btn{width:100%;padding:13px 16px;border-radius:10px;border:none;background:#ede8e0;color:#111;font-size:13px;font-weight:700;cursor:pointer;margin-top:8px;transition:background .15s;font-family:monospace;letter-spacing:.08em;text-transform:uppercase}
-.gate-btn:hover{background:#f8f4ee}
-.gate-error{color:#c0392b;font-size:11px;margin-top:10px;font-family:monospace;letter-spacing:.05em;opacity:0;transition:opacity .2s}
+.gate-eyebrow{font-family:monospace;font-size:10px;letter-spacing:.28em;color:#334155;text-transform:uppercase;margin-bottom:16px;white-space:nowrap}
+.gate-title{font-family:Georgia,'Times New Roman',serif;font-size:26px;font-weight:700;color:#e2e8f0;margin-bottom:28px;text-align:center;line-height:1.2;letter-spacing:-.2px;-webkit-font-smoothing:antialiased}
+.gate-input{width:100%;padding:13px 16px;border-radius:10px;border:1px solid #1e293b;background:#141c2e;color:#cbd5e1;font-family:monospace;font-size:13px;outline:none;transition:border-color .2s;text-align:center;letter-spacing:.05em}
+.gate-input::placeholder{color:#334155}
+.gate-input:focus{border-color:#3b82f6;box-shadow:0 0 0 2px #3b82f622}
+.gate-btn{width:100%;padding:13px 16px;border-radius:10px;border:none;background:#3b82f6;color:#fff;font-size:13px;font-weight:700;cursor:pointer;margin-top:8px;transition:background .15s;font-family:monospace;letter-spacing:.08em;text-transform:uppercase}
+.gate-btn:hover{background:#2563eb}
+.gate-error{color:#f87171;font-size:11px;margin-top:10px;font-family:monospace;letter-spacing:.05em;opacity:0;transition:opacity .2s}
 .gate-error.show{opacity:1}
 ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:#1e293b}::-webkit-scrollbar-thumb{background:#475569;border-radius:3px}
 
