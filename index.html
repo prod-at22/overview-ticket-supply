@@ -101,7 +101,7 @@ tr:hover td{background:#162032}
 
 <div class="header">
   <h1>✈ Ticket <span>Supply</span> Dashboard</h1>
-  <span class="last-fetch">Last fetched: 27 Jun 2026 08:03</span>
+  <span class="last-fetch">Last fetched: 27 Jun 2026 08:05</span>
 </div>
 
 <div class="container">
@@ -264,7 +264,9 @@ function filtered() {
 }
 
 // ── Chart instances ────────────────────────────────────────────────────────
-Chart.register(ChartDataLabels);
+if (typeof ChartDataLabels !== 'undefined') {
+  Chart.register(ChartDataLabels);
+}
 Chart.defaults.set('plugins.datalabels', { display: false });
 
 const charts = {};
@@ -361,14 +363,14 @@ const CHART_DEFAULTS = {
   },
 };
 
-const BAR_DATALABELS = {
+const BAR_DATALABELS = typeof ChartDataLabels !== 'undefined' ? {
   display: true,
   anchor: 'end',
   align: 'right',
   color: '#64748b',
   font: { size: 10, weight: '600' },
   formatter: v => v.toLocaleString(),
-};
+} : { display: false };
 
 function updateChartAirline(rows) {
   const data = sumBy(rows, r => r.airlines).slice(0, 12);
