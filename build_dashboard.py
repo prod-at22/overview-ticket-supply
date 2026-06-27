@@ -172,9 +172,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 /* Password gate */
 #gate{position:fixed;inset:0;background:#0d0b09;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999;gap:0}
 #gate.hidden{display:none}
-.gate-eyebrow{font-family:monospace;font-size:12px;letter-spacing:.25em;color:#6b6660;text-transform:uppercase;margin-bottom:28px}
-.gate-eyebrow span{color:#6b6660}
-.gate-title{font-family:Georgia,'Times New Roman',serif;font-size:52px;font-weight:700;color:#f5f0ea;margin-bottom:40px;text-align:center;line-height:1.1}
+.gate-eyebrow{font-family:monospace;font-size:11px;letter-spacing:.22em;color:#5a5550;text-transform:uppercase;margin-bottom:24px}
+.gate-title{font-family:'Palatino Linotype',Palatino,'Book Antiqua',Georgia,serif;font-size:34px;font-weight:700;color:#e8e2da;margin-bottom:36px;text-align:center;line-height:1.25;letter-spacing:-.3px;-webkit-font-smoothing:antialiased}
 .gate-input{width:480px;max-width:90vw;padding:18px 24px;border-radius:14px;border:1.5px solid #2a2520;background:#141210;color:#f5f0ea;font-family:monospace;font-size:16px;outline:none;transition:border-color .2s;text-align:center}
 .gate-input::placeholder{color:#4a4540}
 .gate-input:focus{border-color:#3a3530}
