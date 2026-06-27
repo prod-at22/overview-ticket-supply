@@ -258,6 +258,7 @@ tr:hover td{background:#162032}
 </head>
 <body>
 
+<script id="payload" type="application/json">__DATA_JSON__</script>
 <div class="header">
   <h1>✈ Ticket <span>Supply</span> Dashboard</h1>
   <span class="last-fetch">Last fetched: __FETCH_DATE__</span>
@@ -386,7 +387,7 @@ tr:hover td{background:#162032}
 </div>
 
 <script>
-let DATA = [];
+const DATA = JSON.parse(document.getElementById('payload').textContent);
 const TODAY = '__TODAY__';
 const PAGE_SIZE = 50;
 
@@ -757,33 +758,25 @@ function buildFilters() {
 function el(id) { return document.getElementById(id); }
 
 // ── Init ───────────────────────────────────────────────────────────────────
-fetch('data.json')
-  .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-  .then(d => { DATA = d; buildFilters(); updateAll(); })
-  .catch(e => {
-    document.body.insertAdjacentHTML('afterbegin',
-      `<div style="background:#7f1d1d;color:#fca5a5;padding:12px 24px;font-size:13px">
-        ⚠ Failed to load data.json: ${e}. Make sure you're serving via HTTP, not file://.
-      </div>`);
-  });
+buildFilters();
+updateAll();
 </script>
 </body>
 </html>"""
 
 
 def generate_html(records, fetch_date):
-    # Write data separately so HTML stays lightweight
-    data_json = json.dumps(records, ensure_ascii=False, separators=(',', ':'))
-    data_out = Path(__file__).parent / 'data.json'
-    data_out.write_text(data_json, encoding='utf-8')
-    print(f'  Written: {data_out} ({len(data_json)//1024}KB)')
+    data_json = json.dumps(records, ensure_ascii=True, separators=(',', ':'))
+    # Escape </script> so it can't break the containing script tag
+    data_json = data_json.replace('</', '<\\/')
 
     html = HTML_TEMPLATE \
+        .replace('__DATA_JSON__', data_json) \
         .replace('__TODAY__', date.today().isoformat()) \
         .replace('__FETCH_DATE__', fetch_date)
     out = Path(__file__).parent / 'dashboard.html'
     out.write_text(html, encoding='utf-8')
-    print(f'  Written: {out}')
+    print(f'  Written: {out} ({len(html)//1024}KB)')
 
 
 def main():
