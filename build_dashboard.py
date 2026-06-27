@@ -163,8 +163,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Ticket Supply Dashboard</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+<script>__CHARTJS_INLINE__</script>
+<script>__DATALABELS_INLINE__</script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f172a;color:#f1f5f9;min-height:100vh}
@@ -337,19 +337,19 @@ tr:hover td{background:#162032}
   <div class="charts-grid">
     <div class="chart-card">
       <div class="chart-title">By Airline</div>
-      <div class="chart-wrap"><canvas id="chart-airline" height="220"></canvas></div>
+      <div class="chart-wrap" style="height:260px"><canvas id="chart-airline" style="width:100%;height:100%"></canvas></div>
     </div>
     <div class="chart-card">
       <div class="chart-title">By Supplier</div>
-      <div class="chart-wrap"><canvas id="chart-supplier" height="220"></canvas></div>
+      <div class="chart-wrap" style="height:260px"><canvas id="chart-supplier" style="width:100%;height:100%"></canvas></div>
     </div>
     <div class="chart-card">
       <div class="chart-title">By Trip Type</div>
-      <div class="chart-wrap" style="display:flex;justify-content:center"><canvas id="chart-type" width="260" height="220" style="max-width:260px"></canvas></div>
+      <div class="chart-wrap" style="display:flex;justify-content:center;height:260px"><canvas id="chart-type" width="260" height="260" style="max-width:260px"></canvas></div>
     </div>
     <div class="chart-card">
       <div class="chart-title">Tickets by Month</div>
-      <div class="chart-wrap"><canvas id="chart-month" height="220"></canvas></div>
+      <div class="chart-wrap" style="height:260px"><canvas id="chart-month" style="width:100%;height:100%"></canvas></div>
     </div>
   </div>
 
@@ -467,7 +467,7 @@ function sumBy(rows, keyFn) {
 // ── Main update ────────────────────────────────────────────────────────────
 function updateAll() {
   const rows = filtered();
-  updateFlownPills(rows);
+  updateFlownPills();
   updateCards(rows);
   updateChartAirline(rows);
   updateChartSupplier(rows);
@@ -477,9 +477,12 @@ function updateAll() {
 }
 
 // ── FLOWN / DEPARTING pills ────────────────────────────────────────────────
-function updateFlownPills(rows) {
-  // Always compute from base data (respect other filters but show both counts)
+function updateFlownPills() {
+  // Compute flown/dep ignoring flownFilter so both pills always show correct totals
+  const saved = state.flownFilter;
+  state.flownFilter = null;
   const baseRows = filtered();
+  state.flownFilter = saved;
   const flown    = baseRows.filter(r => isFlown(r));
   const dep      = baseRows.filter(r => !isFlown(r));
   const fmt = n => n.toLocaleString();
@@ -516,6 +519,7 @@ function updateCards(rows) {
 
 // ── Charts ─────────────────────────────────────────────────────────────────
 const CHART_DEFAULTS = {
+  responsive: false,
   plugins: { legend: { display: false } },
   scales: {
     x: { ticks: { color: '#94a3b8', font:{size:11} }, grid: { color: '#1e293b' } },
@@ -532,10 +536,18 @@ const BAR_DATALABELS = typeof ChartDataLabels !== 'undefined' ? {
   formatter: v => v.toLocaleString(),
 } : { display: false };
 
+function canvasSize(id) {
+  const wrap = el(id).parentElement;
+  return { width: wrap.clientWidth || 500, height: wrap.clientHeight || 260 };
+}
+
 function updateChartAirline(rows) {
   const data = sumBy(rows, r => r.airlines).slice(0, 12);
+  const cv = el('chart-airline');
+  const {width, height} = canvasSize('chart-airline');
+  cv.width = width; cv.height = height;
   destroyChart('airline');
-  charts['airline'] = new Chart(el('chart-airline'), {
+  charts['airline'] = new Chart(cv, {
     type: 'bar',
     data: {
       labels: data.map(d=>d[0]),
@@ -550,8 +562,11 @@ function updateChartAirline(rows) {
 
 function updateChartSupplier(rows) {
   const data = sumBy(rows, r => r.suppliers).slice(0, 12);
+  const cv = el('chart-supplier');
+  const {width, height} = canvasSize('chart-supplier');
+  cv.width = width; cv.height = height;
   destroyChart('supplier');
-  charts['supplier'] = new Chart(el('chart-supplier'), {
+  charts['supplier'] = new Chart(cv, {
     type: 'bar',
     data: {
       labels: data.map(d=>d[0]),
@@ -594,8 +609,11 @@ function updateChartMonth(rows) {
   const months = Object.keys(monthTix).sort();
   const types  = [...new Set(rows.map(r=>r.trip_type||'Other'))].sort();
 
+  const cvM = el('chart-month');
+  const {width: mw, height: mh} = canvasSize('chart-month');
+  cvM.width = mw; cvM.height = mh;
   destroyChart('month');
-  charts['month'] = new Chart(el('chart-month'), {
+  charts['month'] = new Chart(cvM, {
     type: 'bar',
     data: {
       labels: months.map(m => {
@@ -765,12 +783,34 @@ updateAll();
 </html>"""
 
 
+CHARTJS_URL    = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js'
+DATALABELS_URL = 'https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js'
+# npm fallback paths (GitHub Actions: npm install; local dev: pre-downloaded)
+CHARTJS_NPM    = Path(__file__).parent / 'vendor' / 'chart.umd.js'
+DATALABELS_NPM = Path(__file__).parent / 'vendor' / 'chartjs-plugin-datalabels.min.js'
+
+
+def fetch_cdn(url, fallback_path):
+    if fallback_path.exists():
+        print(f'  Using local vendor: {fallback_path.name}')
+        return fallback_path.read_text(encoding='utf-8')
+    print(f'  Fetching {url}')
+    r = requests.get(url, timeout=60)
+    r.raise_for_status()
+    return r.text
+
+
 def generate_html(records, fetch_date):
     data_json = json.dumps(records, ensure_ascii=True, separators=(',', ':'))
-    # Escape </script> so it can't break the containing script tag
     data_json = data_json.replace('</', '<\\/')
 
+    print('Embedding Chart.js bundles...')
+    chartjs_js    = fetch_cdn(CHARTJS_URL, CHARTJS_NPM)
+    datalabels_js = fetch_cdn(DATALABELS_URL, DATALABELS_NPM)
+
     html = HTML_TEMPLATE \
+        .replace('__CHARTJS_INLINE__', chartjs_js) \
+        .replace('__DATALABELS_INLINE__', datalabels_js) \
         .replace('__DATA_JSON__', data_json) \
         .replace('__TODAY__', date.today().isoformat()) \
         .replace('__FETCH_DATE__', fetch_date)
