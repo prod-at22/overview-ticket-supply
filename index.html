@@ -99,10 +99,10 @@ tr:hover td{background:#162032}
 </head>
 <body>
 
-<div id="dbg-bar" style="background:#1e3a5f;color:#93c5fd;padding:6px 24px;font-size:12px;display:none"></div>
+<div id="dbg-bar" style="background:#1e3a5f;color:#93c5fd;padding:6px 24px;font-size:12px">Loading data…</div>
 <div class="header">
   <h1>✈ Ticket <span>Supply</span> Dashboard</h1>
-  <span class="last-fetch">Last fetched: 27 Jun 2026 08:18</span>
+  <span class="last-fetch">Last fetched: 27 Jun 2026 08:20</span>
 </div>
 
 <div class="container">
@@ -612,7 +612,7 @@ fetch('data.json')
     DATA = d;
     try { buildFilters(); } catch(e) { dbg('buildFilters ERROR: ' + e); throw e; }
     try { updateAll(); } catch(e) { dbg('updateAll ERROR: ' + e); throw e; }
-    dbg('');
+    dbg('✓ loaded ' + DATA.length + ' records | filtered: ' + filtered().length);
   })
   .catch(e => {
     document.body.insertAdjacentHTML('afterbegin',
